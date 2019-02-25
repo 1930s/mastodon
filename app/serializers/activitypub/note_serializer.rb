@@ -13,12 +13,17 @@ class ActivityPub::NoteSerializer < ActiveModel::Serializer
   has_many :media_attachments, key: :attachment
   has_many :virtual_tags, key: :tag
 
+  has_many :poll_loaded_options, key: :one_of, if: :poll_and_not_multiple?
+  has_many :poll_loaded_options, key: :any_of, if: :poll_and_multiple?
+
+  attribute :closed, if: :poll_and_expires_at?
+
   def id
     ActivityPub::TagManager.instance.uri_for(object)
   end
 
   def type
-    'Note'
+    object.poll ? 'Question' : 'Note'
   end
 
   def summary
@@ -97,6 +102,26 @@ class ActivityPub::NoteSerializer < ActiveModel::Serializer
     object.account.local?
   end
 
+  def poll_loaded_options
+    object.poll.loaded_options
+  end
+
+  def poll_and_multiple?
+    object.poll&.multiple?
+  end
+
+  def poll_and_not_multiple?
+    object.poll && !object.poll.multiple?
+  end
+
+  def closed
+    object.poll.expires_at.iso8601
+  end
+
+  def poll_and_expires_at?
+    object.poll&.expires_at&.present?
+  end
+
   class MediaAttachmentSerializer < ActiveModel::Serializer
     include RoutingHelper
 
@@ -163,5 +188,35 @@ class ActivityPub::NoteSerializer < ActiveModel::Serializer
   end
 
   class CustomEmojiSerializer < ActivityPub::EmojiSerializer
+  end
+
+  class OptionSerializer < ActiveModel::Serializer
+    class RepliesSerializer < ActiveModel::Serializer
+      attributes :type, :total_items
+
+      def type
+        'Collection'
+      end
+
+      def total_items
+        object.votes
+      end
+    end
+
+    attributes :type, :content
+
+    has_one :replies, serializer: ActivityPub::NoteSerializer::OptionSerializer::RepliesSerializer
+
+    def type
+      'Note'
+    end
+
+    def content
+      object.title
+    end
+
+    def replies
+      object
+    end
   end
 end
